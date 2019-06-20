@@ -2,6 +2,8 @@ module Data.TaggedSum.Internal where
 
 import Prelude
 
+import Data.Maybe (Maybe(..))
+import Data.List as L
 import Control.Monad.Except (throwError)
 import Data.Lens.Prism (Prism, Prism', matching, prism, review)
 import Data.Either (Either(..))
@@ -22,6 +24,28 @@ newtype TaggedSum (r :: # Type) = TaggedSum
   { tag :: String
   , contents :: Any
   }
+
+class TaggedSumEqs (rl :: RowList) where
+  taggedSumEqs :: RLProxy rl -> L.List { tag :: String, eq :: (Any -> Any -> Boolean) }
+
+instance eqTaggedSumNil :: TaggedSumEqs Nil where
+  taggedSumEqs _ = L.Nil
+
+instance eqTaggedSumCons :: (IsSymbol name, TaggedSumEqs rs, Eq a) => TaggedSumEqs (Cons name a rs) where
+  taggedSumEqs _ = L.Cons { tag: reflectSymbol name, eq: coerceEq eq } (taggedSumEqs (RLProxy :: RLProxy rs))
+    where
+      name = SProxy :: SProxy name
+      coerceEq :: (a -> a -> Boolean) -> Any -> Any -> Boolean
+      coerceEq = unsafeCoerce
+
+instance eqTaggedSum :: (RowToList r rl, TaggedSumEqs rl) => Eq (TaggedSum r)  where
+  eq (TaggedSum a) (TaggedSum b)
+    | a.tag == b.tag = 
+      let eqs = taggedSumEqs (RLProxy :: RLProxy rl)
+      in case L.find ((==) a.tag <<< _.tag) eqs of
+        Nothing -> false
+        Just {eq:eq'} -> eq' (unsafeCoerce a.contents) (unsafeCoerce b.contents)
+    | otherwise = false
 
 -- | Get the tag for a `TaggedSum`.
 getTag :: forall r. TaggedSum r -> String
