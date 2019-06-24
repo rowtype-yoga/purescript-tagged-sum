@@ -2,8 +2,6 @@ module Data.TaggedSum.Internal where
 
 import Prelude
 
-import Data.Maybe (Maybe(..))
-import Data.List as L
 import Control.Monad.Except (throwError)
 import Data.Lens.Prism (Prism, Prism', matching, prism, review)
 import Data.Either (Either(..))
@@ -24,28 +22,6 @@ newtype TaggedSum (r :: # Type) = TaggedSum
   { tag :: String
   , contents :: Any
   }
-
-class TaggedSumEqs (rl :: RowList) where
-  taggedSumEqs :: RLProxy rl -> L.List { tag :: String, eq :: (Any -> Any -> Boolean) }
-
-instance eqTaggedSumNil :: TaggedSumEqs Nil where
-  taggedSumEqs _ = L.Nil
-
-instance eqTaggedSumCons :: (IsSymbol name, TaggedSumEqs rs, Eq a) => TaggedSumEqs (Cons name a rs) where
-  taggedSumEqs _ = L.Cons { tag: reflectSymbol name, eq: coerceEq eq } (taggedSumEqs (RLProxy :: RLProxy rs))
-    where
-      name = SProxy :: SProxy name
-      coerceEq :: (a -> a -> Boolean) -> Any -> Any -> Boolean
-      coerceEq = unsafeCoerce
-
-instance eqTaggedSum :: (RowToList r rl, TaggedSumEqs rl) => Eq (TaggedSum r)  where
-  eq (TaggedSum a) (TaggedSum b)
-    | a.tag == b.tag = 
-      let eqs = taggedSumEqs (RLProxy :: RLProxy rl)
-      in case L.find ((==) a.tag <<< _.tag) eqs of
-        Nothing -> false
-        Just {eq:eq'} -> eq' (unsafeCoerce a.contents) (unsafeCoerce b.contents)
-    | otherwise = false
 
 -- | Get the tag for a `TaggedSum`.
 getTag :: forall r. TaggedSum r -> String
@@ -218,3 +194,36 @@ instance encodeHelperCons
         { tag: reflectSymbol l
         , contents: encode a
         }
+class EqRL (rl :: RowList) (r :: # Type) where
+  eqRL :: RLProxy rl -> TaggedSum r -> TaggedSum r -> Boolean
+
+instance nilEqRL :: (RowToList r rl, AllVoid rl) => EqRL Nil r where
+  eqRL _ = match
+
+instance consEqRL
+    :: ( IsSymbol l
+       , Eq a
+       , Row.Cons l a r_ r
+       , Row.Cons l Void r_ r_void
+       , EqRL rl r_void
+       )
+    => EqRL (Cons l a rl) r
+  where
+    eqRL _ t1 t2 =
+        case matching l t1, matching l t2 of
+          Left t1_, Left t2_ ->
+            eqRL (RLProxy :: RLProxy rl) t1_ t2_
+          Right a1, Right a2 ->
+            a1 == a2
+          _, _ ->
+            false
+      where
+        l :: Prism (TaggedSum r) (TaggedSum r_void) a Void
+        l = tag (SProxy :: SProxy l)
+
+instance eqTaggedSum
+    :: ( RowToList r rl
+       , EqRL rl r
+       )
+    => Eq (TaggedSum r) where
+  eq = eqRL (RLProxy :: RLProxy rl)
