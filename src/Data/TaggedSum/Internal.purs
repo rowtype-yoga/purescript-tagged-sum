@@ -194,3 +194,36 @@ instance encodeHelperCons
         { tag: reflectSymbol l
         , contents: encode a
         }
+class EqRL (rl :: RowList) (r :: # Type) where
+  eqRL :: RLProxy rl -> TaggedSum r -> TaggedSum r -> Boolean
+
+instance nilEqRL :: (RowToList r rl, AllVoid rl) => EqRL Nil r where
+  eqRL _ = match
+
+instance consEqRL
+    :: ( IsSymbol l
+       , Eq a
+       , Row.Cons l a r_ r
+       , Row.Cons l Void r_ r_void
+       , EqRL rl r_void
+       )
+    => EqRL (Cons l a rl) r
+  where
+    eqRL _ t1 t2 =
+        case matching l t1, matching l t2 of
+          Left t1_, Left t2_ ->
+            eqRL (RLProxy :: RLProxy rl) t1_ t2_
+          Right a1, Right a2 ->
+            a1 == a2
+          _, _ ->
+            false
+      where
+        l :: Prism (TaggedSum r) (TaggedSum r_void) a Void
+        l = tag (SProxy :: SProxy l)
+
+instance eqTaggedSum
+    :: ( RowToList r rl
+       , EqRL rl r
+       )
+    => Eq (TaggedSum r) where
+  eq = eqRL (RLProxy :: RLProxy rl)
